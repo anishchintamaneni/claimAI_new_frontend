@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import axios from "axios";
 import {
   Box,
   Button,
@@ -10,20 +11,93 @@ import {
   Text,
   Radio,
   RadioGroup,
-  Checkbox,
   Stack,
-  useToast,
   Input,
+  Select,
+  HStack,
+  useToast,
 } from "@chakra-ui/react";
 
 const ProcessDocumentsPage = () => {
-  const [selectedCatalog, setSelectedCatalog] = useState("");
-  const [selectedRepositories, setSelectedRepositories] = useState([]);
+  const defaultOneChat = ["", "user"];
+  const number = [];
+  for (let i = 0; i < 10000; i++) number[i] = i;
+  const defaultHistory = number.map((i) => defaultOneChat);
+
+  const [chatHistory, setChatHistory] = useState(defaultHistory);
+  const [isLoading, setIsLoading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
+  const [length, setLength] = useState(0);
+  const [message, setMessage] = useState("");
+  const [filesname, setFilesname] = useState([]);
+  const [isUserInput, setIsUserInput] = useState(false);
+  const [method, setMethod] = useState("llama3.1");
+  const [collection, setSelectedCollection] = useState("DOI");
+  const divRef = useRef();
   const toast = useToast();
 
-  const catalogNames = ["Wireless", "Enforcement", "Media"]; // Replace with actual catalog names
-  const repositories = ["AWS", "Azure", "Box"];
+  const isImagePath = (path) => /\.(jpg|jpeg|png|gif)$/.test(path);
+
+  const handleChange = (event) => {
+    setMessage(event.target.value);
+  };
+
+  const handleMethodChange = (event) => {
+    setMethod(event.target.value);
+  };
+
+  const handleCollectionChange = (event) => {
+    setSelectedCollection(event.target.value);
+  };
+
+  const handleEnter = () => {
+    const newChatHistory = [...chatHistory];
+    newChatHistory[length] = [message, "user"];
+    setChatHistory(newChatHistory);
+    setLength(length + 1);
+    setIsUserInput(true);
+    setIsLoading(true);
+  };
+
+  const getAnswer = async () => {
+    try {
+      const response = await axios.post("https://docquest.cogniai.com/api/get-answer", {
+        question: message,
+        method,
+        collection,
+      });
+      setMessage("");
+      const newChatHistory = [...chatHistory];
+      const { files, source } = response.data;
+      if (Array.isArray(files)) {
+        setFilesname(files);
+      } else {
+        console.error("Expected files to be an array");
+      }
+      if (source) {
+        newChatHistory[length] = [response.data.message, source, "bot"];
+      }
+      setChatHistory(newChatHistory);
+      setLength(length + 1);
+      setIsUserInput(false);
+      setIsLoading(false);
+    } catch (error) {
+      console.error("Error fetching answer:", error);
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isUserInput) return;
+    getAnswer();
+  }, [isUserInput]);
+
+  useEffect(() => {
+    divRef.current?.scrollTo({
+      behavior: "smooth",
+      top: divRef.current.scrollHeight,
+    });
+  }, [chatHistory]);
 
   const handleFileUpload = (event) => {
     const files = Array.from(event.target.files);
@@ -37,128 +111,151 @@ const ProcessDocumentsPage = () => {
     });
   };
 
-  const handleProcessDocuments = () => {
-    if (!selectedCatalog || selectedRepositories.length === 0 || uploadedFiles.length === 0) {
-      toast({
-        title: "Error",
-        description: "Please select a catalog, at least one repository, and upload files.",
-        status: "error",
-        duration: 3000,
-        isClosable: true,
-      });
-      return;
+  const uploadFile = (e) => {
+    const formData = new FormData();
+    const files = e.target.files;
+    if (!files.length) return;
+    for (let i = 0; i < files.length; i++) {
+      formData.append("file", files[i]);
     }
+    formData.append("method", method);
+    formData.append("collection", collection);
 
-    toast({
-      title: "Processing",
-      description: "Your documents are being processed. Please wait...",
-      status: "info",
-      duration: 3000,
-      isClosable: true,
-    });
-
-    // Add logic for processing documents
-    console.log("Selected Catalog:", selectedCatalog);
-    console.log("Selected Repositories:", selectedRepositories);
-    console.log("Uploaded Files:", uploadedFiles);
-  };
-
-  const handleRepositorySelection = (repository) => {
-    setSelectedRepositories((prev) =>
-      prev.includes(repository)
-        ? prev.filter((repo) => repo !== repository)
-        : [...prev, repository]
-    );
+    setIsLoading(true);
+    axios
+      .post("https://docquest.cogniai.com/api/get-file-analysis", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      })
+      .then((response) => {
+        const { files, message, source } = response.data;
+        if (Array.isArray(files)) {
+          setFilesname(files);
+        }
+        const newChatHistory = [...chatHistory];
+        newChatHistory[length] = [message, source || "", "bot"];
+        setChatHistory(newChatHistory);
+        setLength(length + 1);
+        setIsLoading(false);
+      })
+      .catch((error) => {
+        console.error("Error uploading file:", error);
+        setIsLoading(false);
+      });
   };
 
   return (
-    <Box p={40}>
-      <VStack spacing={8} align="stretch">
-        <Text fontSize="2xl" fontWeight="bold">
-          Process Documents
-        </Text>
-        <Text fontSize="sm" color="gray.500">
-          Last Updated: August 05, 2024
-        </Text>
+    <Box bg="#ececec" h="100vh" px={8} py={10}>
+      <Box mb={20}>
+        <HStack justifyContent="space-between" alignItems="center">
+        </HStack>
+      </Box>
 
-        {/* Step 1: Select Catalog */}
-        <Box>
-          <FormControl>
-            <FormLabel fontSize="lg" fontWeight="bold">
-              Step 1: Select a Catalog
-            </FormLabel>
-            <RadioGroup
-              value={selectedCatalog}
-              onChange={(value) => setSelectedCatalog(value)}
-            >
-              <Stack direction="row" spacing={6}>
-                {catalogNames.map((catalog) => (
-                  <Radio
-                    key={catalog}
-                    value={catalog}
-                    colorScheme="blue"
-                    size="lg"
-                  >
-                    {catalog}
-                  </Radio>
-                ))}
-              </Stack>
-            </RadioGroup>
-          </FormControl>
-        </Box>
-
-        {/* Step 2: Choose Repositories */}
-        <Box>
-          <FormControl>
-            <FormLabel fontSize="lg" fontWeight="bold">
-              Step 2: Choose Repositories
-            </FormLabel>
-            <Stack direction="row" spacing={6}>
-              {repositories.map((repo) => (
-                <Checkbox
-                  key={repo}
-                  value={repo}
-                  isChecked={selectedRepositories.includes(repo)}
-                  onChange={() => handleRepositorySelection(repo)}
-                  colorScheme="blue"
-                  size="lg"
-                >
-                  {repo}
-                </Checkbox>
-              ))}
-            </Stack>
-          </FormControl>
-        </Box>
-
-        {/* Step 3: Upload Files */}
-        <Box>
-          <FormControl>
-            <FormLabel fontSize="lg" fontWeight="bold">
-              Step 3: Upload Documents
-            </FormLabel>
-            <Input
-              type="file"
-              multiple
-              onChange={handleFileUpload}
-              accept=".pdf,.doc,.docx,.txt"
-            />
-          </FormControl>
-        </Box>
-
-        {/* Process Documents Button */}
-        <Button
-          colorScheme="blue"
-          size="lg"
-          onClick={handleProcessDocuments}
-          isDisabled={
-            !selectedCatalog ||
-            selectedRepositories.length === 0 ||
-            uploadedFiles.length === 0
-          }
+      <HStack spacing={10} align="flex-start" h="full">
+        <VStack
+          w="40%"
+          spacing={10}
+          bg="white"
+          p={6}
+          borderRadius="lg"
+          boxShadow="md"
+          h="full"
+          overflowY="auto"
         >
-          Process Documents
-        </Button>
-      </VStack>
+
+          <FormControl>
+            <FormLabel fontWeight="bold">Upload single File for Analysis</FormLabel>
+            <Input type="file" multiple onChange={handleFileUpload} accept=".pdf,.doc,.docx,.txt" />
+          </FormControl>
+
+          <HStack spacing={8} w="full">
+            <Input type="file" onChange={uploadFile} multiple />
+            <Button colorScheme="purple" onClick={handleEnter} isDisabled={isLoading}>
+              Send
+            </Button>
+          </HStack>
+
+          <FormControl>
+            <FormLabel fontWeight="bold">LLM Selection</FormLabel>
+            <Select value={method} onChange={handleMethodChange}>
+              <option value="llama3.1">Llama 3.1</option>
+              <option value="mistral">Mistral</option>
+            </Select>
+          </FormControl>
+
+          <FormControl>
+            <FormLabel fontWeight="bold">Catalog Selection</FormLabel>
+            <Select value={collection} onChange={handleCollectionChange}>
+              <option value="DOI">DOI</option>
+              <option value="OEA">OEA</option>
+              <option value="APEX">APEX</option>
+              <option value="WCB">WCB</option>
+              <option value="COR">COR</option>
+            </Select>
+          </FormControl>
+
+          <FormControl>
+            <FormLabel fontWeight="bold">Files in the Selected Catalog</FormLabel>
+            <Box border="1px solid #e1e1e1" p={2} borderRadius="md">
+              {filesname.length > 0 ? (
+                filesname.map((file, index) => <Text key={index}>{file}</Text>)
+              ) : (
+                <Text>Catalog documents</Text>
+              )}
+            </Box>
+          </FormControl>
+        </VStack>
+
+        <VStack
+          w="60%"
+          spacing={6}
+          bg="white"
+          p={6}
+          borderRadius="lg"
+          boxShadow="md"
+          h="full"
+          overflowY="auto"
+        >
+          <Box
+            border="1px solid #e1e1e1"
+            p={4}
+            borderRadius="md"
+            h="70%"
+            overflowY="auto"
+            w="full"
+            ref={divRef}
+          >
+            {chatHistory.map((i, idx) =>
+              i[0] !== "" ? (
+                <Box key={idx} mb={4}>
+                  <Text fontWeight="bold">{i[1] === "user" ? "User" : "AI"}</Text>
+                  {isImagePath(i[0]) ? (
+                    <img src={i[0]} alt={i[0]} style={{ maxWidth: "100%" }} />
+                  ) : (
+                    <Text>{i[0]}</Text>
+                  )}
+                </Box>
+              ) : null
+            )}
+            {isLoading && <Text>Loading...</Text>}
+          </Box>
+
+          <FormControl>
+            <Input
+              placeholder="I am here to assist you. Let me know how I can help..."
+              value={message}
+              onChange={handleChange}
+              isDisabled={isLoading}
+            />
+            <Button mt={4} colorScheme="blue" onClick={handleEnter} isDisabled={isLoading}>
+              Enter
+            </Button>
+          </FormControl>
+
+          
+        </VStack>
+      </HStack>
     </Box>
   );
 };
